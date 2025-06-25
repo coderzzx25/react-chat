@@ -8,34 +8,38 @@ import { debounce } from 'lodash';
 import { searchUser } from '@/service/modules/user';
 import { BASE_URL } from '@/service/config';
 
+// 创建Socket.IO连接
 const socket: typeof Socket = io(BASE_URL, {
-  transports: ['websocket']
+  transports: ['websocket'] // 指定使用websocket传输
 });
 
+// 定义对话列表项接口
 interface IConversationList {
-  uuid: string;
-  cnName: string;
-  avatarUrl: string;
-  time: string;
-  unread: number;
-  lastMessage: string;
+  uuid: string; // 用户唯一标识
+  cnName: string; // 中文名
+  avatarUrl: string; // 头像URL
+  time: string; // 最后消息时间
+  unread: number; // 未读消息数
+  lastMessage: string; // 最后一条消息内容
 }
 
+// 定义消息接口
 interface Message {
-  id: string;
-  senderId: string;
-  recipientId: string;
-  content: string;
-  status: 'sent' | 'delivered' | 'read';
-  createTime: string;
-  updateTime: string;
+  id: string; // 消息ID
+  senderId: string; // 发送者ID
+  recipientId: string; // 接收者ID
+  content: string; // 消息内容
+  status: 'sent' | 'delivered' | 'read'; // 消息状态
+  createTime: string; // 创建时间
+  updateTime: string; // 更新时间
 }
 
+// 定义搜索用户信息接口
 interface ISearchUserInfo {
-  uuid: string;
-  email: string;
-  cnName: string;
-  avatarUrl: string;
+  uuid: string; // 用户唯一标识
+  email: string; // 邮箱
+  cnName: string; // 中文名
+  avatarUrl: string; // 头像URL
 }
 
 interface IProps {
@@ -43,38 +47,42 @@ interface IProps {
 }
 
 const Chat: FC<IProps> = () => {
+  // 从Redux store获取用户信息
   const { userInfo } = useAppSelector((state) => state.user, useAppShallowEqual);
-  const [conversations, setConversations] = useState<IConversationList[]>([]);
-  const [activeRecipient, setActiveRecipient] = useState<string | null>(null);
-  const [history, setHistory] = useState<Message[]>([]);
-  const [message, setMessage] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<ISearchUserInfo[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(350);
-  const [isResizing, setIsResizing] = useState(false);
-  const sidebarRef = useRef<HTMLDivElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [totalUnread, setTotalUnread] = useState(0);
-  const [isPageVisible, setIsPageVisible] = useState(true);
-  const [isMobileView, setIsMobileView] = useState(false);
-  const [showConversationList, setShowConversationList] = useState(true);
-  const [showChatView, setShowChatView] = useState(false);
 
-  // Check for mobile view
+  // 状态管理
+  const [conversations, setConversations] = useState<IConversationList[]>([]); // 对话列表
+  const [activeRecipient, setActiveRecipient] = useState<string | null>(null); // 当前聊天对象ID
+  const [history, setHistory] = useState<Message[]>([]); // 当前聊天历史消息
+  const [message, setMessage] = useState(''); // 输入框消息
+  const [searchQuery, setSearchQuery] = useState(''); // 搜索查询
+  const [searchResults, setSearchResults] = useState<ISearchUserInfo[]>([]); // 搜索结果
+  const [isSearching, setIsSearching] = useState(false); // 是否正在搜索
+  const [sidebarWidth, setSidebarWidth] = useState(350); // 侧边栏宽度
+  const [isResizing, setIsResizing] = useState(false); // 是否正在调整侧边栏大小
+  const sidebarRef = useRef<HTMLDivElement>(null); // 侧边栏DOM引用
+  const messagesEndRef = useRef<HTMLDivElement>(null); // 消息列表底部DOM引用
+  const [totalUnread, setTotalUnread] = useState(0); // 总未读消息数
+  const [isPageVisible, setIsPageVisible] = useState(true); // 页面是否可见
+  const [isMobileView, setIsMobileView] = useState(false); // 是否是移动端视图
+  const [showConversationList, setShowConversationList] = useState(true); // 是否显示对话列表
+  const [showChatView, setShowChatView] = useState(false); // 是否显示聊天视图
+
+  // 检查是否是移动端视图
   useEffect(() => {
     const checkIfMobile = () => {
-      setIsMobileView(window.innerWidth <= 768);
+      setIsMobileView(window.innerWidth <= 768); // 窗口宽度小于等于768px视为移动端
     };
 
-    checkIfMobile();
-    window.addEventListener('resize', checkIfMobile);
-    return () => window.removeEventListener('resize', checkIfMobile);
+    checkIfMobile(); // 初始检查
+    window.addEventListener('resize', checkIfMobile); // 监听窗口大小变化
+    return () => window.removeEventListener('resize', checkIfMobile); // 清理
   }, []);
 
-  // Adjust view states for mobile
+  // 根据移动端视图调整显示状态
   useEffect(() => {
     if (isMobileView) {
+      // 移动端视图下，根据是否有活跃聊天对象切换视图
       if (activeRecipient) {
         setShowConversationList(false);
         setShowChatView(true);
@@ -83,78 +91,81 @@ const Chat: FC<IProps> = () => {
         setShowChatView(false);
       }
     } else {
+      // 桌面视图下同时显示两个视图
       setShowConversationList(true);
       setShowChatView(true);
     }
   }, [isMobileView, activeRecipient]);
 
-  // Page visibility
+  // 页面可见性变化处理
   useEffect(() => {
     const handleVisibilityChange = () => {
-      setIsPageVisible(!document.hidden);
+      setIsPageVisible(!document.hidden); // 更新页面可见状态
       if (!document.hidden) {
-        document.title = 'Chat';
+        document.title = 'Chat'; // 页面可见时重置标题
       }
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('visibilitychange', handleVisibilityChange); // 监听可见性变化
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('visibilitychange', handleVisibilityChange); // 清理
     };
   }, []);
 
-  // Debounced search
+  // 防抖搜索函数
   const debouncedSearch = useCallback(
     debounce(async (query: string) => {
       if (query.trim() === '') {
-        setSearchResults([]);
+        setSearchResults([]); // 空查询清空结果
         return;
       }
 
       try {
-        setIsSearching(true);
-        const results = await searchUser(query);
-        setSearchResults(results);
+        setIsSearching(true); // 开始搜索
+        const results = await searchUser(query); // 调用搜索API
+        setSearchResults(results); // 设置搜索结果
       } catch (error) {
-        console.error('Search failed:', error);
-        setSearchResults([]);
+        console.error('Search failed:', error); // 错误处理
+        setSearchResults([]); // 清空结果
       } finally {
-        setIsSearching(false);
+        setIsSearching(false); // 结束搜索
       }
-    }, 500),
+    }, 500), // 500ms防抖
     []
   );
 
-  // Update tab title
+  // 更新标签页标题显示未读消息数
   useEffect(() => {
     if (totalUnread > 0 && isPageVisible) {
       document.title = `You have ${totalUnread} unread message${totalUnread > 1 ? 's' : ''}`;
     } else {
-      document.title = 'Chat';
+      document.title = 'Chat'; // 重置标题
     }
   }, [totalUnread, isPageVisible]);
 
-  // Scroll to bottom
+  // 滚动到底部函数
   const scrollToBottom = useCallback(() => {
     if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView();
+      messagesEndRef.current.scrollIntoView(); // 滚动到消息底部
     }
   }, []);
 
-  // Scroll when history changes
+  // 当历史消息或活跃聊天对象变化时滚动到底部
   useEffect(() => {
     scrollToBottom();
   }, [history, activeRecipient, scrollToBottom]);
 
-  // Browser notifications
+  // 浏览器通知处理
   useEffect(() => {
     if (totalUnread > 0 && !isPageVisible) {
       if (Notification.permission === 'granted') {
+        // 已授权则显示通知
         new Notification(`You have ${totalUnread} new message${totalUnread > 1 ? 's' : ''}`, {
-          icon: userInfo?.avatarUrl,
+          icon: userInfo?.avatarUrl, // 使用用户头像
           body: 'Click to view messages'
         });
       } else if (Notification.permission !== 'denied') {
+        // 未拒绝则请求权限
         Notification.requestPermission().then((permission) => {
           if (permission === 'granted') {
             new Notification(`You have ${totalUnread} new message${totalUnread > 1 ? 's' : ''}`, {
@@ -167,95 +178,108 @@ const Chat: FC<IProps> = () => {
     }
   }, [totalUnread, isPageVisible, userInfo?.avatarUrl]);
 
-  // Socket connection
+  // Socket.IO连接和初始化
   useEffect(() => {
     if (userInfo?.uuid) {
-      socket.emit('register', userInfo?.uuid);
-      socket.emit('getConversations', userInfo?.uuid);
+      socket.emit('register', userInfo?.uuid); // 注册用户
+      socket.emit('getConversations', userInfo?.uuid); // 获取对话列表
     }
   }, [userInfo?.uuid]);
 
-  // Socket events
+  // Socket.IO事件监听
   useEffect(() => {
+    // 连接成功事件
     socket.on('connect', () => {
       if (userInfo?.uuid) {
-        socket.emit('register', userInfo?.uuid);
-        socket.emit('getConversations', userInfo?.uuid);
+        socket.emit('register', userInfo?.uuid); // 重新注册
+        socket.emit('getConversations', userInfo?.uuid); // 重新获取对话
       }
     });
 
+    // 断开连接事件
     socket.on('disconnect', () => {});
 
+    // 收到私聊消息事件
     socket.on('privateMessage', (msg: Message) => {
+      // 如果是当前聊天对象的消息或自己发给自己的消息
       if (
         msg.senderId === activeRecipient ||
         msg.recipientId === activeRecipient ||
         (msg.senderId === userInfo?.uuid && msg.recipientId === userInfo?.uuid && activeRecipient === userInfo?.uuid)
       ) {
-        setHistory((prev) => [...prev, msg]);
+        setHistory((prev) => [...prev, msg]); // 添加到历史消息
       }
 
+      // 如果是发给自己的已送达消息
       if (msg.recipientId === userInfo?.uuid && msg.status === 'delivered') {
         setConversations((prev) => {
+          // 更新对应对话的未读计数
           const updated = prev.map((c) => (c.uuid === msg.senderId ? { ...c, unread: (c.unread || 0) + 1 } : c));
-          const unreadTotal = updated.reduce((sum, c) => sum + (c.unread || 0), 0);
+          const unreadTotal = updated.reduce((sum, c) => sum + (c.unread || 0), 0); // 计算总未读
           setTotalUnread(unreadTotal);
           return updated;
         });
       }
     });
 
+    // 获取消息历史事件
     socket.on('messageHistory', (data: { withUser: string; messages: Message[] }) => {
-      setHistory(data.messages);
+      setHistory(data.messages); // 设置历史消息
 
       if (data.withUser) {
         setConversations((prev) => {
+          // 重置对应对话的未读计数
           const updated = prev.map((c) => (c.uuid === data.withUser ? { ...c, unread: 0 } : c));
-          const unreadTotal = updated.reduce((sum, c) => sum + (c.unread || 0), 0);
+          const unreadTotal = updated.reduce((sum, c) => sum + (c.unread || 0), 0); // 计算总未读
           setTotalUnread(unreadTotal);
           return updated;
         });
       }
     });
 
+    // 获取对话列表事件
     socket.on('conversationList', (conversationList: IConversationList[]) => {
-      setConversations(conversationList);
-      const unreadTotal = conversationList.reduce((sum, c) => sum + (c.unread || 0), 0);
+      setConversations(conversationList); // 设置对话列表
+      const unreadTotal = conversationList.reduce((sum, c) => sum + (c.unread || 0), 0); // 计算总未读
       setTotalUnread(unreadTotal);
     });
 
+    // 更新对话列表事件
     socket.on('updateConversations', () => {
-      socket.emit('getConversations', userInfo?.uuid);
+      socket.emit('getConversations', userInfo?.uuid); // 重新获取对话列表
     });
 
+    // 清理事件监听
     return () => {
       socket.off('connect');
       socket.off('disconnect');
       socket.off('privateMessage');
       socket.off('messageHistory');
       socket.off('conversationList');
-      socket.disconnect();
+      socket.disconnect(); // 断开连接
     };
   }, [userInfo?.uuid]);
 
-  // Search input change
+  // 搜索输入变化处理
   useEffect(() => {
-    debouncedSearch(searchQuery);
-    return () => debouncedSearch.cancel();
+    debouncedSearch(searchQuery); // 执行防抖搜索
+    return () => debouncedSearch.cancel(); // 清理时取消防抖
   }, [searchQuery, debouncedSearch]);
 
-  // Sidebar resizing
+  // 侧边栏调整大小相关函数
   const startResizing = () => setIsResizing(true);
   const stopResizing = () => setIsResizing(false);
   const resize = (e: MouseEvent) => {
     if (isResizing && sidebarRef.current) {
-      const newWidth = e.clientX;
+      const newWidth = e.clientX; // 获取新宽度
       if (newWidth > 250 && newWidth < 600) {
+        // 限制宽度范围
         setSidebarWidth(newWidth);
       }
     }
   };
 
+  // 监听鼠标移动和释放事件
   useEffect(() => {
     window.addEventListener('mousemove', resize);
     window.addEventListener('mouseup', stopResizing);
@@ -265,33 +289,36 @@ const Chat: FC<IProps> = () => {
     };
   }, [isResizing]);
 
-  // Message functions
+  // 发送消息函数
   const sendMessage = () => {
-    if (!activeRecipient || !message) return;
+    if (!activeRecipient || !message) return; // 验证输入
 
     socket.emit(
       'privateMessage',
       {
-        recipientId: activeRecipient,
-        content: message
+        recipientId: activeRecipient, // 接收者ID
+        content: message // 消息内容
       },
       (response: { success: boolean; message: Message }) => {
         if (response.success) {
-          setHistory((prev) => [...prev, response.message]);
+          setHistory((prev) => [...prev, response.message]); // 添加到历史消息
           setConversations((prev) => {
+            // 更新对话列表
             const existingCIndex = prev.findIndex((c) => c.uuid === activeRecipient);
             if (existingCIndex >= 0) {
+              // 已有对话则更新
               const updated = [...prev];
               updated[existingCIndex] = {
                 ...updated[existingCIndex],
-                time: 'Just now',
-                lastMessage: message,
-                unread: 0
+                time: 'Just now', // 更新时间
+                lastMessage: message, // 更新最后消息
+                unread: 0 // 重置未读
               };
-              const unreadTotal = updated.reduce((sum, c) => sum + (c.unread || 0), 0);
+              const unreadTotal = updated.reduce((sum, c) => sum + (c.unread || 0), 0); // 计算总未读
               setTotalUnread(unreadTotal);
               return updated;
             } else {
+              // 新对话则添加
               const recipientInfo = searchResults.find((u) => u.uuid === activeRecipient) || {
                 uuid: activeRecipient,
                 cnName: 'Unknown',
@@ -316,34 +343,39 @@ const Chat: FC<IProps> = () => {
       }
     );
 
-    setMessage('');
+    setMessage(''); // 清空输入框
   };
 
+  // 加载历史消息
   const loadHistory = (targetUserId: string) => {
-    setActiveRecipient(targetUserId);
+    setActiveRecipient(targetUserId); // 设置活跃聊天对象
     socket.emit('getHistory', { otherUserId: targetUserId }, () => {
       requestAnimationFrame(() => {
-        scrollToBottom();
+        scrollToBottom(); // 滚动到底部
       });
     });
 
+    // 更新对话未读状态
     setConversations((prev) => {
       const updated = prev.map((c) => (c.uuid === targetUserId ? { ...c, unread: 0 } : c));
-      const unreadTotal = updated.reduce((sum, c) => sum + (c.unread || 0), 0);
+      const unreadTotal = updated.reduce((sum, c) => sum + (c.unread || 0), 0); // 计算总未读
       setTotalUnread(unreadTotal);
       return updated;
     });
 
+    // 重置页面标题
     if (isPageVisible) {
       document.title = 'Chat';
     }
   };
 
+  // 开始新聊天
   const startNewChat = (recipient: ISearchUserInfo) => {
-    setActiveRecipient(recipient.uuid);
-    setSearchQuery('');
-    setSearchResults([]);
+    setActiveRecipient(recipient.uuid); // 设置活跃聊天对象
+    setSearchQuery(''); // 清空搜索
+    setSearchResults([]); // 清空结果
 
+    // 如果对话列表中不存在则添加
     if (!conversations.some((c) => c.uuid === recipient.uuid)) {
       setConversations((prev) => [
         ...prev,
@@ -359,12 +391,14 @@ const Chat: FC<IProps> = () => {
     }
   };
 
+  // 返回对话列表视图（移动端）
   const handleBackToConversations = () => {
-    setActiveRecipient(null);
-    setShowConversationList(true);
-    setShowChatView(false);
+    setActiveRecipient(null); // 清空活跃聊天对象
+    setShowConversationList(true); // 显示对话列表
+    setShowChatView(false); // 隐藏聊天视图
   };
 
+  // 获取当前聊天对象信息
   const getActiveRecipientInfo = () => {
     if (!activeRecipient) return null;
     const fromConversations = conversations.find((c) => c.uuid === activeRecipient);
@@ -376,7 +410,7 @@ const Chat: FC<IProps> = () => {
 
   return (
     <div className="flex h-screen bg-gray-100 overflow-hidden">
-      {/* Left sidebar */}
+      {/* 左侧边栏 - 对话列表 */}
       {(showConversationList || !isMobileView) && (
         <div
           ref={sidebarRef}
@@ -388,6 +422,7 @@ const Chat: FC<IProps> = () => {
             display: isMobileView ? (showConversationList ? 'flex' : 'none') : 'flex'
           }}
         >
+          {/* 侧边栏调整大小手柄 */}
           {!isMobileView && (
             <div
               className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize bg-gray-200 z-10"
@@ -395,7 +430,7 @@ const Chat: FC<IProps> = () => {
             />
           )}
 
-          {/* Header */}
+          {/* 顶部用户信息 */}
           <div className="flex justify-between items-center p-3 bg-gray-100">
             <div className="flex items-center">
               <img src={userInfo?.avatarUrl} alt="Profile" className="w-10 h-10 rounded-full" />
@@ -405,7 +440,7 @@ const Chat: FC<IProps> = () => {
             </div>
           </div>
 
-          {/* Search */}
+          {/* 搜索区域 */}
           <div className="p-2 bg-gray-100 relative">
             <div className="flex items-center bg-white rounded-lg px-3 py-1">
               <FiSearch className="text-gray-500 mr-2" />
@@ -418,6 +453,7 @@ const Chat: FC<IProps> = () => {
               />
             </div>
 
+            {/* 搜索结果下拉框 */}
             {searchQuery && (
               <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-60 overflow-y-auto">
                 {isSearching ? (
@@ -449,7 +485,7 @@ const Chat: FC<IProps> = () => {
             )}
           </div>
 
-          {/* Chats list */}
+          {/* 对话列表 */}
           <div className="flex-1 overflow-y-auto no-scrollbar">
             {conversations.map((chat) => (
               <div
@@ -490,12 +526,12 @@ const Chat: FC<IProps> = () => {
         </div>
       )}
 
-      {/* Chat area */}
+      {/* 右侧聊天区域 */}
       {(showChatView || !isMobileView) && (
         <div className={`flex-1 flex flex-col min-w-0 ${isMobileView ? 'w-full' : ''}`}>
           {activeRecipient ? (
             <>
-              {/* Chat header */}
+              {/* 聊天顶部信息栏 */}
               <div className="flex justify-between items-center p-3 border-b border-gray-300 bg-gray-100">
                 <div className="flex items-center">
                   {isMobileView && (
@@ -519,7 +555,7 @@ const Chat: FC<IProps> = () => {
                 </div>
               </div>
 
-              {/* Message history */}
+              {/* 消息历史区域 */}
               <div
                 className="flex-1 p-4 overflow-y-auto no-scrollbar bg-[#e5ddd5] bg-opacity-30 bg-[url('https://web.whatsapp.com/img/bg-chat-tile-light_a4be512e7195b6b733d9110b408f075d.png')]"
                 style={{ backgroundSize: '412.5px 749.25px' }}
@@ -562,7 +598,7 @@ const Chat: FC<IProps> = () => {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Message input */}
+              {/* 消息输入区域 */}
               <div className="flex items-center p-3 bg-gray-100">
                 <div className="flex space-x-2 text-gray-600 mr-2">
                   <FiSmile className="text-xl cursor-pointer" />
@@ -585,6 +621,7 @@ const Chat: FC<IProps> = () => {
               </div>
             </>
           ) : (
+            // 默认空状态
             <div className="flex-1 flex items-center justify-center bg-gray-50">
               <div className="text-center p-6 max-w-md">
                 <h2 className="text-2xl font-light text-gray-600 mb-2">Chat App</h2>
