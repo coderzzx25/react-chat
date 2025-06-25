@@ -187,7 +187,13 @@ const Chat: FC<IProps> = () => {
     socket.on('disconnect', () => {});
 
     socket.on('privateMessage', (msg: Message) => {
-      setHistory((prev) => [...prev, msg]);
+      if (
+        msg.senderId === activeRecipient ||
+        msg.recipientId === activeRecipient ||
+        (msg.senderId === userInfo?.uuid && msg.recipientId === userInfo?.uuid && activeRecipient === userInfo?.uuid)
+      ) {
+        setHistory((prev) => [...prev, msg]);
+      }
 
       if (msg.recipientId === userInfo?.uuid && msg.status === 'delivered') {
         setConversations((prev) => {
@@ -271,6 +277,7 @@ const Chat: FC<IProps> = () => {
       },
       (response: { success: boolean; message: Message }) => {
         if (response.success) {
+          setHistory((prev) => [...prev, response.message]);
           setConversations((prev) => {
             const existingCIndex = prev.findIndex((c) => c.uuid === activeRecipient);
             if (existingCIndex >= 0) {
