@@ -72,4 +72,4 @@ npm run prettier
 ### 存在问题
 
 1. 路由鉴权
-2. 多个标签页问题(socket抽离，仅需一个socket实例)
+2. 多个标签页问题

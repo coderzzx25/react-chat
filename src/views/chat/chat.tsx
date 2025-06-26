@@ -2,37 +2,10 @@ import { useState, useRef, useEffect, useCallback, FC, ReactNode } from 'react';
 import { FiMoreVertical, FiSearch, FiPaperclip, FiMic, FiSmile, FiArrowLeft } from 'react-icons/fi';
 import { BsCheck2All, BsThreeDotsVertical } from 'react-icons/bs';
 import { IoMdSend } from 'react-icons/io';
-import io, { Socket } from 'socket.io-client';
 import { useAppSelector, useAppShallowEqual } from '@/store';
 import { debounce } from 'lodash';
 import { searchUser } from '@/service/modules/user';
-import { BASE_URL } from '@/service/config';
-
-// 创建Socket.IO连接
-const socket: typeof Socket = io(BASE_URL, {
-  transports: ['websocket'] // 指定使用websocket传输
-});
-
-// 定义对话列表项接口
-interface IConversationList {
-  uuid: string; // 用户唯一标识
-  cnName: string; // 中文名
-  avatarUrl: string; // 头像URL
-  time: string; // 最后消息时间
-  unread: number; // 未读消息数
-  lastMessage: string; // 最后一条消息内容
-}
-
-// 定义消息接口
-interface Message {
-  id: string; // 消息ID
-  senderId: string; // 发送者ID
-  recipientId: string; // 接收者ID
-  content: string; // 消息内容
-  status: 'sent' | 'delivered' | 'read'; // 消息状态
-  createTime: string; // 创建时间
-  updateTime: string; // 更新时间
-}
+import socketService, { IConversationList, Message } from '@/service/socket';
 
 // 定义搜索用户信息接口
 interface ISearchUserInfo {
@@ -181,26 +154,16 @@ const Chat: FC<IProps> = () => {
   // Socket.IO连接和初始化
   useEffect(() => {
     if (userInfo?.uuid) {
-      socket.emit('register', userInfo?.uuid); // 注册用户
-      socket.emit('getConversations', userInfo?.uuid); // 获取对话列表
+      socketService.connect(userInfo.uuid);
     }
+
+    return () => {
+      socketService.disconnect();
+    };
   }, [userInfo?.uuid]);
 
-  // Socket.IO事件监听
   useEffect(() => {
-    // 连接成功事件
-    socket.on('connect', () => {
-      if (userInfo?.uuid) {
-        socket.emit('register', userInfo?.uuid); // 重新注册
-        socket.emit('getConversations', userInfo?.uuid); // 重新获取对话
-      }
-    });
-
-    // 断开连接事件
-    socket.on('disconnect', () => {});
-
-    // 收到私聊消息事件
-    socket.on('privateMessage', (msg: Message) => {
+    const handlePrivateMessage = (msg: Message) => {
       // 如果是当前聊天对象的消息或自己发给自己的消息
       if (
         msg.senderId === activeRecipient ||
@@ -209,7 +172,6 @@ const Chat: FC<IProps> = () => {
       ) {
         setHistory((prev) => [...prev, msg]); // 添加到历史消息
       }
-
       // 如果是发给自己的已送达消息
       if (msg.recipientId === userInfo?.uuid && msg.status === 'delivered') {
         setConversations((prev) => {
@@ -220,12 +182,9 @@ const Chat: FC<IProps> = () => {
           return updated;
         });
       }
-    });
-
-    // 获取消息历史事件
-    socket.on('messageHistory', (data: { withUser: string; messages: Message[] }) => {
+    };
+    const handleMessageHistory = (data: { withUser: string; messages: Message[] }) => {
       setHistory(data.messages); // 设置历史消息
-
       if (data.withUser) {
         setConversations((prev) => {
           // 重置对应对话的未读计数
@@ -235,30 +194,32 @@ const Chat: FC<IProps> = () => {
           return updated;
         });
       }
-    });
+    };
 
-    // 获取对话列表事件
-    socket.on('conversationList', (conversationList: IConversationList[]) => {
+    const handleConversationList = (conversationList: IConversationList[]) => {
       setConversations(conversationList); // 设置对话列表
       const unreadTotal = conversationList.reduce((sum, c) => sum + (c.unread || 0), 0); // 计算总未读
       setTotalUnread(unreadTotal);
-    });
-
-    // 更新对话列表事件
-    socket.on('updateConversations', () => {
-      socket.emit('getConversations', userInfo?.uuid); // 重新获取对话列表
-    });
-
-    // 清理事件监听
-    return () => {
-      socket.off('connect');
-      socket.off('disconnect');
-      socket.off('privateMessage');
-      socket.off('messageHistory');
-      socket.off('conversationList');
-      socket.disconnect(); // 断开连接
     };
-  }, [userInfo?.uuid]);
+
+    const handleUpdateConversations = () => {
+      if (userInfo?.uuid) {
+        socketService.getConversations(userInfo.uuid); // 重新获取对话列表
+      }
+    };
+
+    socketService.on('privateMessage', handlePrivateMessage);
+    socketService.on('messageHistory', handleMessageHistory);
+    socketService.on('conversationList', handleConversationList);
+    socketService.on('updateConversations', handleUpdateConversations);
+
+    return () => {
+      socketService.off('privateMessage', handlePrivateMessage);
+      socketService.off('messageHistory', handleMessageHistory);
+      socketService.off('conversationList', handleConversationList);
+      socketService.off('updateConversations', handleUpdateConversations);
+    };
+  }, [userInfo?.uuid, activeRecipient]);
 
   // 搜索输入变化处理
   useEffect(() => {
@@ -291,57 +252,45 @@ const Chat: FC<IProps> = () => {
 
   // 发送消息函数
   const sendMessage = () => {
-    if (!activeRecipient || !message) return; // 验证输入
-
-    socket.emit(
-      'privateMessage',
-      {
-        recipientId: activeRecipient, // 接收者ID
-        content: message // 消息内容
-      },
-      (response: { success: boolean; message: Message }) => {
-        if (response.success) {
-          setHistory((prev) => [...prev, response.message]); // 添加到历史消息
-          setConversations((prev) => {
-            // 更新对话列表
-            const existingCIndex = prev.findIndex((c) => c.uuid === activeRecipient);
-            if (existingCIndex >= 0) {
-              // 已有对话则更新
-              const updated = [...prev];
-              updated[existingCIndex] = {
-                ...updated[existingCIndex],
-                time: 'Just now', // 更新时间
-                lastMessage: message, // 更新最后消息
-                unread: 0 // 重置未读
-              };
-              const unreadTotal = updated.reduce((sum, c) => sum + (c.unread || 0), 0); // 计算总未读
-              setTotalUnread(unreadTotal);
-              return updated;
-            } else {
-              // 新对话则添加
-              const recipientInfo = searchResults.find((u) => u.uuid === activeRecipient) || {
-                uuid: activeRecipient,
-                cnName: 'Unknown',
-                avatarUrl: ''
-              };
-              const newConversations = [
-                ...prev,
-                {
-                  uuid: recipientInfo.uuid,
-                  cnName: recipientInfo.cnName,
-                  avatarUrl: recipientInfo.avatarUrl,
-                  time: 'Just now',
-                  unread: 0,
-                  lastMessage: message
-                }
-              ];
-              setTotalUnread(0);
-              return newConversations;
-            }
-          });
-        }
+    if (!activeRecipient || !message) return;
+    socketService.sendPrivateMessage(activeRecipient, message, (response) => {
+      if (response.success) {
+        setConversations((prev) => {
+          const existingCIndex = prev.findIndex((c) => c.uuid === activeRecipient);
+          if (existingCIndex >= 0) {
+            const updated = [...prev];
+            updated[existingCIndex] = {
+              ...updated[existingCIndex],
+              time: 'Just now',
+              lastMessage: message,
+              unread: 0
+            };
+            const unreadTotal = updated.reduce((sum, c) => sum + (c.unread || 0), 0);
+            setTotalUnread(unreadTotal);
+            return updated;
+          } else {
+            const recipientInfo = searchResults.find((u) => u.uuid === activeRecipient) || {
+              uuid: activeRecipient,
+              cnName: 'Unknown',
+              avatarUrl: ''
+            };
+            const newConversations = [
+              ...prev,
+              {
+                uuid: recipientInfo.uuid,
+                cnName: recipientInfo.cnName,
+                avatarUrl: recipientInfo.avatarUrl,
+                time: 'Just now',
+                unread: 0,
+                lastMessage: message
+              }
+            ];
+            setTotalUnread(0);
+            return newConversations;
+          }
+        });
       }
-    );
+    });
 
     setMessage(''); // 清空输入框
   };
@@ -349,7 +298,8 @@ const Chat: FC<IProps> = () => {
   // 加载历史消息
   const loadHistory = (targetUserId: string) => {
     setActiveRecipient(targetUserId); // 设置活跃聊天对象
-    socket.emit('getHistory', { otherUserId: targetUserId }, () => {
+
+    socketService.getHistory(targetUserId, () => {
       requestAnimationFrame(() => {
         scrollToBottom(); // 滚动到底部
       });
