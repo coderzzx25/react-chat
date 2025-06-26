@@ -1,10 +1,5 @@
-# React项目搭建模版
+# React Chat App
 
-## 模版介绍
-
-需要使用 node 18 以上版本,Vite 5.0 不在支持 node 18 以下版本
-
-使用TS二次封装axios,使用redux-toolkit管理全局状态数据,使用styled-components作为样式解决方案
 
 ### 使用的技术栈
 
@@ -15,6 +10,7 @@
 5. react-redux 9.2.0
 6. axios 1.6.2
 7. react-router-dom 7.2.0
+8. socket.io-client 4.8.1
 
 ### 样式解决方案
 
@@ -72,3 +68,8 @@ npm run build
 ```bash
 npm run prettier
 ```
+
+### 存在问题
+
+1. 路由鉴权
+2. 多个标签页问题(socket抽离，仅需一个socket实例)
